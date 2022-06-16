@@ -1,0 +1,296 @@
+import logging
+import time
+from selenium.webdriver.common.keys import Keys
+from infra import EndPoint
+from infra.gui.exceptions import SecureBrowserNotFoundError
+from infra.gui.wad import Appium
+from infra.util import retry
+from tests.tests_actions.extensions import clean_chrome_on_host_env
+from typing import Tuple
+from infra.gui.browser import find_browser_element
+from selenium.webdriver.remote.webelement import WebElement
+
+
+logger = logging.getLogger(__name__)
+
+XPATH_TIMEOUT = 20
+
+url_redirection_xpath = dict(
+    chrome="/Pane[@Name=\"Google Chrome\"]",
+    chrome_new_tab="/Pane[@Name=\"New Tab - Google Chrome\"]",
+    chrome_welcome_to_chrome_tab="/Pane[contains(@Name, 'Welcome to Chrome - Google Chrome')]",
+    chrome_search_bar="/Edit[@Name=\"Address and search bar\"]",
+    extensions="/MenuItem[@Name=\"Extensions\"]",
+    hysolate_extension_button="/Button[@Name=\"Hysolate Browser Extension\"]",
+    hysolate_extension_document="/Document[@Name=\"Hysolate Browser Extension\"]",
+    customize_extension="/Button[@Name=\"Customize\"]",
+    website_allow_list="//Edit",
+    website_allow_button="/Button[@Name=\"Save allow list\"]",
+    restricted_window="/Pane[contains(@Name, 'Page Restricted')]",
+    network_err_window="/Pane[contains(@Name, 'Network error')]",
+    privacy_error_window="/Pane[contains(@Name, 'Privacy error')]",
+    restricted_window_text="Page Restricted",
+    privacy_error_text="Privacy error",
+    network_err_text="Network error",
+    uncategorized="/Button[@Name=\"Uncategorized\"]"
+)
+
+forbidden_site_data = dict(
+    forbidden_site="testingmcafeesites.com",
+    forbidden_site_text_guest="URL for testing. - Google Chrome (Remote)",
+    forbidden_site_text_host="URL for testing. - Google Chrome",
+    forbidden_site_window="/Pane[contains(@Name, 'URL for testing')]"
+)
+
+authorized_site_data = dict(
+    authorized_site="bet365.com",
+    authorized_site_text_guest="bet365 - Sportsbook and Casino Betting - Google Chrome (Remote)",
+    authorized_site_text_host="bet365 - Sportsbook and Casino Betting - Google Chrome",
+    authorized_site_window="/Pane[contains(@Name, 'bet365')]"
+)
+
+
+@retry(10, 3)
+def open_hysolate_extension_settings(end_point: EndPoint, timeout: int = 20) -> None:
+    clean_chrome_on_host_env(end_point)
+    logger.info("Start opening hysolate extension settings window")
+    end_point.winrm_host.run_on_foreground_user(
+        end_point.PSEXEC_HOST,
+        'start /max chrome --app=google.com'
+    )
+    extensions = end_point.gui_manager.appium_host.find_element_by_xpath_with_timeout(
+        url_redirection_xpath["extensions"],
+        timeout * 2
+    )
+    if not extensions:
+        raise Exception("Extensions component wasn't found")
+    extensions.click()
+    logger.info("Clicked on extensions component")
+    hysolate_extension_button = end_point.gui_manager.appium_host.find_element_by_xpath_with_timeout(
+        url_redirection_xpath["hysolate_extension_button"],
+        timeout
+    )
+    if not hysolate_extension_button:
+        raise Exception("Hysolate extension button wasn't found")
+    hysolate_extension_button.click()
+    logger.info("Clicked on hysolate extension button")
+    hysolate_extension_document = end_point.gui_manager.appium_host.find_element_by_xpath_with_timeout(
+        url_redirection_xpath["hysolate_extension_document"],
+        timeout
+    )
+    if not hysolate_extension_document:
+        raise Exception("Hysolate extension document wasn't found")
+    logger.info("Found Hysolate extension document")
+
+
+@retry(3, 3)
+def open_customize(end_point: EndPoint, timeout: int = 10) -> None:
+    customize_extension_button = end_point.gui_manager.appium_host.find_element_by_xpath_with_timeout(
+        url_redirection_xpath["customize_extension"],
+        timeout
+    )
+    if not customize_extension_button:
+        raise Exception("Customize extension button wasn't found")
+    customize_extension_button.click()
+    logger.info("Clicked on customize component")
+
+
+@retry(3, 3)
+def turn_off_uncategorized(end_point: EndPoint, timeout: int = 10) -> None:
+    hysolate_extension_window = end_point.gui_manager.appium_host.find_element_by_xpath_with_timeout(
+        url_redirection_xpath["hysolate_extension_document"],
+        timeout
+    )
+    if not hysolate_extension_window:
+        raise Exception("Hysolate extension document wasn't found")
+    logger.info("Found Hysolate extension document")
+    hysolate_extension_window_childrens = Appium.find_childrens_element(
+        hysolate_extension_window
+    )
+    if hysolate_extension_window_childrens:
+        uncategorized_button = [
+            hysolate_extension_window_children
+            for hysolate_extension_window_children in hysolate_extension_window_childrens
+            if hysolate_extension_window_children.get_attribute('ControlType') == 'ControlType.CheckBox'
+        ][-1]
+        if not uncategorized_button:
+            raise Exception("uncategorized button button wasn't found")
+        uncategorized_button.click()
+        logger.info("Clicked on uncategorized component")
+    else:
+        logger.error("Hysolate extension document childrens weren't found")
+
+
+@retry(2, 3)
+def open_url_redirection_settings(end_point: EndPoint) -> None:
+    end_point.switch_to_host()
+    open_hysolate_extension_settings(end_point)
+    open_customize(end_point)
+
+
+def add_site_to_allow_list(end_point: EndPoint, timeout: int = 10) -> None:
+    website_allow_list = end_point.gui_manager.appium_host.find_element_by_xpath_with_timeout(
+        url_redirection_xpath["website_allow_list"],
+        timeout
+    )
+    if not website_allow_list:
+        raise Exception("Website allow list wasn't found")
+    logger.info("Found website allow list component")
+    website_allow_list.send_keys(authorized_site_data['authorized_site'])
+    logger.info(f"Entered {authorized_site_data['authorized_site']} to allow site list component")
+    website_allow_button = end_point.gui_manager.appium_host.find_element_by_xpath_with_timeout(
+        url_redirection_xpath["website_allow_button"],
+        timeout
+    )
+    if not website_allow_button:
+        raise Exception("Website allow button wasn't found")
+    website_allow_button.click()
+    logger.info("Clicked on  website allow button component")
+
+
+def launch_site_host(
+        end_point: EndPoint,
+        site: str,
+        timeout: int = 10
+) -> WebElement:
+    logger.info("Start chrome")
+    end_point.winrm_host.run_on_foreground_user(
+        end_point.PSEXEC_HOST,
+        'start chrome --app=google.com'
+    )
+    chrome_tab = end_point.gui_manager.appium_host.find_element_by_xpath_with_timeout(
+        url_redirection_xpath['chrome_new_tab'],
+        timeout * 2
+    )
+    if not chrome_tab:
+        chrome_tab = end_point.gui_manager.appium_host.find_element_by_xpath_with_timeout(
+            url_redirection_xpath['chrome_welcome_to_chrome_tab'],
+            timeout * 2
+        )
+        if not chrome_tab:
+            raise Exception("Chrome component wasn't found")
+        logger.info("Its The First Chrome To Be Open in The Machine")
+    logger.info("Found Chrome extension tab")
+    search_bar = Appium.find_children_by_xpath(
+        chrome_tab,
+        url_redirection_xpath['chrome_search_bar'],
+    )
+    if not search_bar:
+        raise Exception("Search bar wasn't found")
+    search_bar.send_keys(Keys.ENTER)
+    search_bar.send_keys(Keys.CONTROL + "a")
+    search_bar.send_keys(f"https://www.{site}/" + Keys.ENTER)
+    logger.info(f"Send {site} data into search bar")
+    return chrome_tab
+
+
+def validate_site_not_redirected_host_to_host(
+        end_point: EndPoint,
+        site_window: str,
+        site_text: str,
+        chrome_host: WebElement,
+) -> Tuple[bool, str]:
+    logger.info("Checking host environment\'s open sites")
+    try:
+        secure_browser = find_browser_element(end_point)
+    except SecureBrowserNotFoundError:
+        if url_redirection_xpath['restricted_window_text'] in chrome_host.text:
+            return False, f'Secure Browser was Opened When it Should Not be Open with site {secure_browser.text}'
+        if site_text in chrome_host.text:
+            logger.info(f"The site stayed on host without redirection as expected")
+            return True, " "
+        logger.info("Looking for special cases of sites - network or privacy error windows")
+        if url_redirection_xpath['privacy_error_text'] in chrome_host.text or \
+                url_redirection_xpath['network_error_text'] in chrome_host.text:
+            return True, " "
+    return False, f'the site window {site_window} Not in host as well not privacy or network error'
+
+
+def validate_site_redirection_host_to_guest(
+        end_point: EndPoint,
+        site_window: str,
+        site_text: str,
+        chrome_host: WebElement,
+) -> Tuple[bool, str]:
+    logger.info("Checking guest environment\'s open sites and Checking Host Browser restricted window")
+    secure_browser = find_browser_element(end_point)
+    if secure_browser and url_redirection_xpath["restricted_window_text"] in chrome_host.text:
+        logger.info("Checking secure browser text")
+        if site_text in secure_browser.text:
+            logger.info("Secure browser opened with successful redirection")
+            return True, " "
+        elif url_redirection_xpath['privacy_error_text'] in secure_browser.text:
+            logger.info("Secure browser opened with successful redirection and with Privacy  error")
+            return True, " "
+        elif url_redirection_xpath['network_err_text'] in secure_browser.text:
+            logger.info("Secure browser opened with successful redirection and with Network error")
+            return True, " "
+    return False, f"Secure Browser Did Not open with site {site_window} OR Site on Host Did Not redirected to guest "\
+                  f"via Page Is Restricted- redirection Failed"
+
+
+def validate_365_site_allow_list(end_point: EndPoint) -> None:
+    open_url_redirection_settings(end_point)
+    add_site_to_allow_list(end_point)
+    clean_chrome_on_host_env(end_point)
+    end_point.gui_manager.focus_on_desktop()
+    chrome_on_host = launch_site_host(end_point, authorized_site_data['authorized_site'])
+    logger.info(f"Checking Secure Browser {authorized_site_data['authorized_site']} was open via redirection")
+    opened_as_expected, err_message = validate_site_not_redirected_host_to_host(
+        end_point,
+        authorized_site_data["authorized_site_window"],
+        authorized_site_data["authorized_site_text_host"],
+        chrome_on_host
+    )
+    assert opened_as_expected, f"{err_message}"
+
+
+def validate_365_site(end_point: EndPoint) -> None:
+    end_point.gui_manager.focus_on_desktop()
+    chrome_host = launch_site_host(
+        end_point,
+        authorized_site_data['authorized_site'],
+    )
+    logger.info(f"Checking Secure Browser {authorized_site_data['authorized_site']} was open via redirection")
+    opened_as_expected, err_message = validate_site_redirection_host_to_guest(
+        end_point,
+        authorized_site_data["authorized_site_window"],
+        authorized_site_data["authorized_site_text_guest"],
+        chrome_host
+    )
+    assert opened_as_expected, f"{err_message}"
+
+
+def validate_testingmcafeesites_site(end_point: EndPoint) -> None:
+    end_point.gui_manager.focus_on_desktop()
+    chrome_host = launch_site_host(
+        end_point,
+        forbidden_site_data["forbidden_site"]
+    )
+    logger.info(f"Checking Secure Browser {forbidden_site_data['forbidden_site']} was open via redirection")
+    opened_as_expected, err_message = validate_site_redirection_host_to_guest(
+        end_point,
+        forbidden_site_data["forbidden_site_window"],
+        forbidden_site_data["forbidden_site_text_guest"],
+        chrome_host
+    )
+    assert opened_as_expected, f"{err_message}"
+
+
+def validate_testingmcafeesites_site_uncategorized(end_point: EndPoint) -> None:
+    end_point.gui_manager.focus_on_desktop()
+    open_hysolate_extension_settings(end_point)
+    turn_off_uncategorized(end_point)
+    clean_chrome_on_host_env(end_point)
+    chrome_on_host = launch_site_host(
+        end_point,
+        forbidden_site_data['forbidden_site'],
+    )
+    logger.info(f"Checking if Secure Browser Did NOT Open")
+    opened_as_expected, err_message = validate_site_not_redirected_host_to_host(
+        end_point,
+        forbidden_site_data["forbidden_site_window"],
+        forbidden_site_data["forbidden_site_text_host"],
+        chrome_on_host
+    )
+    assert opened_as_expected, f"{err_message}"
